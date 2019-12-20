@@ -6,8 +6,54 @@ from scipy.sparse.linalg.eigen.arpack import eigsh
 import sys
 from gcn.input_data import pollute_data
 import json
-from networkx.readwrite import json_graph
 import os
+from networkx.readwrite import json_graph as jg
+
+
+import sys
+sys.path.insert(1, '/Users/april/Downloads/GCN_detection_benchmarkFinal/GCN_detection_benchmark/gcn/Preprocessing/')
+
+
+
+def create_G_idM_classM(adjacency, features, testMask, valMask, labels):
+    # 1. Create Graph
+    print("Creating graph...")
+    # Create graph from adjacency matrix
+    G = nx.from_numpy_matrix(adjacency)
+    num_nodes = G.number_of_nodes()
+
+    # Change labels to int from numpy.int64
+    labels = labels.tolist()
+    for arr in labels:
+        for integer in arr:
+            integer = int(integer)
+
+    # Iterate through each node, adding the features
+    i = 0
+    for n in list(G):
+        G.node[i]['feature'] = list(map(float, list(features[i])))
+        G.node[i]['test'] = bool(testMask[i])
+        G.node[i]['val'] = bool(valMask[i])
+        G.node[i]['labels'] = list(map(int, list(labels[i])))
+        i += 1
+
+    # 2. Create id-Map and class-Map
+    print("Creating id-Map and class-Map...")
+    # Initialize the dictionarys
+    idM = {}
+    classM = {}
+
+    # Populate the dictionarys
+    i = 0
+    while i < num_nodes:
+        idStr = str(i)
+        idM[idStr] = i
+        classM[idStr] = list(labels[i])
+        i += 1
+
+    return G, idM, classM
+
+
 
 
 
@@ -46,6 +92,7 @@ def load_data(dataset_str):
     :param dataset_str: Dataset name
     :return: All data input files loaded (as well the training/test data).
     """
+    #Use mask to translate a fully supervised setting to a semi-supervised setting
     names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
     objects = []
     for i in range(len(names)):
@@ -87,13 +134,25 @@ def load_data(dataset_str):
     #Just choose another 500 training instances as validation set
     idx_val = range(len(y), len(y)+500)
 
-
+    '''
     idx_train = range(1208)
     idx_val = range(1208,  1208+ 500)
 
 
     attributes, labels = pollute_data(labels, features, idx_train, idx_val, idx_test)
+    '''
+    #testing the label rate of cora dataset
+    if dataset_str == 'cora':
+        num_train = len(y)
+        total_num = len(ally)+len(ty)
+        label_ratio_cora = num_train *1.0/total_num
+        print(label_ratio_cora)
 
+    if dataset_str == 'citeseer':
+        num_train = len(y)
+        total_num = len(ally) + len(ty)
+        label_ratio_citeseer = num_train * 1.0 / total_num
+        print(label_ratio_citeseer)
 
 
     #vector of size 2708, idx_train as true
@@ -104,13 +163,43 @@ def load_data(dataset_str):
     y_train = np.zeros(labels.shape)
     y_val = np.zeros(labels.shape)
     y_test = np.zeros(labels.shape)
+    #only assign label value when the train_mask as true
     y_train[train_mask, :] = labels[train_mask, :]
     y_val[val_mask, :] = labels[val_mask, :]
     #testing instance starts from 1708
     y_test[test_mask, :] = labels[test_mask, :]
 
 
-    return adj, attributes, y_train, y_val, y_test, train_mask, val_mask, test_mask
+    #Translate adj to numpy arrays
+    adj_np = adj.toarray()
+
+    #translate features to numpy arrays
+    features_np = features.toarray()
+
+    #generate the graph and id_map, class_map
+    G, IDMap, classMap =create_G_idM_classM(adj_np, features_np, test_mask, val_mask, labels)
+
+
+    #at this stage, for all validation nodes, test nodes we have their labels but use mask tp make them
+    #all [0 0 0 0 0 0 0]
+
+    num_edges =len(G.edges())
+    print(num_edges)
+    print(G.number_of_edges())
+
+    #Dump everything into .json files and one .npy
+    if dataset_str == 'cora':
+        graphFile_prefix = '/Users/april/Downloads/GraphSAGE_Benchmark-master/processed/cora'
+        dataset_name = 'cora_process'
+        dumpJSON(graphFile_prefix, dataset_name, G, IDMap, classMap, features_np)
+
+    if dataset_str == 'citeseer':
+        graphFile_prefix = '/Users/april/Downloads/GraphSAGE_Benchmark-master/processed/citeseer'
+        dataset_name = 'citeseer_process'
+        dumpJSON(graphFile_prefix, dataset_name, G, IDMap, classMap, features_np)
+
+
+    return adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask
 
 
 def sparse_to_tuple(sparse_mx):
@@ -268,10 +357,11 @@ def load_bsbm_data(path,prefix, normalize=True):
                 idx_test.append(node)
 
     print("training label shape is")
-    print(y_train.shape)
+    #print(y_train.shape)
     y_train = np.delete(y_train,0,axis=0)
     y_val = np.delete(y_val,0,axis=0)
     y_test = np.delete(y_test,0,axis=0)
+    print(y_train.shape)
 
     #generate train_mask, val_mask and test_mask
     train_mask = sample_mask(idx_train, len(G.node))
@@ -346,3 +436,34 @@ def load_bsbm_data(path,prefix, normalize=True):
 
     feats = sp.csr_matrix(feats)
     return adj, feats, y_train, y_val, y_test, train_mask, val_mask, test_mask
+
+
+def dumpJSON(destDirect, datasetName, graph, idMap, classMap, features):
+    print("Dumping into JSON files...")
+    # Turn graph into data
+    dataG = jg.node_link_data(graph)
+    # print(graph.number_of_edges())
+    # Make names
+    json_G_name = destDirect + '/' + datasetName + '-G.json'
+    json_ID_name = destDirect + '/' + datasetName + '-id_map.json'
+    json_C_name = destDirect + '/' + datasetName + '-class_map.json'
+    npy_F_name = destDirect + '/' + datasetName + '-feats'
+
+    # Dump graph into json file
+    with open(json_G_name, 'w') as outputFile:
+        json.dump(dataG, outputFile)
+
+    # Dump idMap into json file
+    with open(json_ID_name, 'w') as outputFile:
+        json.dump(idMap, outputFile)
+
+    # Dump classMap into json file
+    with open(json_C_name, 'w') as outputFile:
+        json.dump(classMap, outputFile)
+
+    # Save features as .npy file
+    print("Saving features as numpy file...")
+    np.save(npy_F_name, features)
+
+    print("all part finished")
+

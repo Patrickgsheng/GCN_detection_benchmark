@@ -174,7 +174,7 @@ class GCN(Model):
         self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
                                                   self.placeholders['labels_mask'])
 
-        self.loss = tf.clip_by_value(self.loss, 1e-37, 1e+37)
+        #self.loss = tf.clip_by_value(self.loss, 1e-37, 1e+37)
 
     def _accuracy(self):
         self.accuracy = masked_accuracy(self.outputs, self.placeholders['labels'],
@@ -202,24 +202,14 @@ class GCN(Model):
 
     def _build(self):
 
-
-        self.layers.append(Dense(input_dim =self.input_dim,
-                                 output_dim = FLAGS.hidden0,
-                                 placeholders = self.placeholders,
-                                 dropout=True,
-                                 sparse_inputs=True,
-                                 act=lambda x: x,
-                                 bias=False,
-                                 featureless=False))
-
-
-
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden0,
+        self.layers.append(GraphConvolution(input_dim=self.input_dim,
                                             output_dim=FLAGS.hidden1,
                                             placeholders=self.placeholders,
                                             act=tf.nn.relu,
                                             dropout=True,
+                                            sparse_inputs=True,
                                             logging=self.logging))
+
 
         #Normal functions are defined using the def keyword and anonymous functions are defined using lambda keyword
         #lambda arguments: expression
